@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TW AutoTrader — 六大策略訊號圖解</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12131A;
+    --card-bg: #1A1C26;
+    --border: #2A2D3A;
+    --fg: #E8E6E1;
+    --muted: #8A8D9A;
+    --accent: #D4A843;
+    --accent2: #C17F59;
+    --buy: #3ECF8E;
+    --sell: #F0544F;
+    --grid: rgba(255,255,255,0.04);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Noto Sans TC', -apple-system, sans-serif;
+    line-height: 1.6;
+    padding: 48px 24px;
+    min-height: 100vh;
+  }
+  .page-header {
+    max-width: 1400px;
+    margin: 0 auto 48px;
+    text-align: center;
+  }
+  .page-header h1 {
+    font-family: 'Noto Serif TC', serif;
+    font-weight: 900;
+    font-size: clamp(28px, 4vw, 42px);
+    letter-spacing: 0.04em;
+    color: var(--fg);
+    margin-bottom: 8px;
+  }
+  .page-header h1 span { color: var(--accent); }
+  .page-header p {
+    color: var(--muted);
+    font-size: 15px;
+    font-weight: 300;
+  }
+  .grid {
+    max-width: 1800px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  @media (max-width: 1200px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 768px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 20px 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .card-header .name {
+    font-family: 'Noto Serif TC', serif;
+    font-weight: 600;
+    font-size: 20px;
+    color: var(--fg);
+  }
+  .card-header .name em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .card-header .stock {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .card-desc {
+    padding: 6px 24px 16px;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 300;
+    border-bottom: 1px solid var(--border);
+  }
+  .chart-wrap {
+    padding: 16px;
+    position: relative;
+  }
+  canvas {
+    width: 100%;
+    height: 320px;
+    display: block;
+  }
+  .legend {
+    padding: 0 24px 16px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .legend-line {
+    width: 20px;
+    height: 2px;
+    border-radius: 1px;
+  }
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>六大策略<span>訊號圖解</span></h1>
+  <p>每種策略的買賣訊號觸發邏輯與走勢圖對照</p>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+// ── Color palette ──
+const C = {
+  bg: '#1A1C26', grid: 'rgba(255,255,255,0.05)',
+  price: '#E8E6E1',
+  ma9: '#5B9BD5', ma21: '#ED7D31',
+  bbUpper: 'rgba(212,168,67,0.35)', bbMid: 'rgba(212,168,67,0.5)', bbLower: 'rgba(212,168,67,0.35)',
+  vwap: '#B07DD8', vwapBand: 'rgba(176,125,216,0.2)',
+  donchian: 'rgba(193,127,89,0.4)',
+  instBar: '#3ECF8E', instBarNeg: '#F0544F',
+  ma10: '#ED7D31', ma20: '#5B9BD5',
+  buy: '#3ECF8E', sell: '#F0544F',
+  label: '#8A8D9A', accent: '#D4A843',
+  rsi: '#6BC5E8',
+};
+
+// ── Seeded PRNG (deterministic) ──
+let _seed = 42;
+function srand(s) { _seed = s; }
+function rand() { _seed = (_seed * 16807 + 0) % 2147483647; return (_seed - 1) / 2147483646; }
+
+// ── Data generators (deterministic) ──
+function genTrend(len, start, drift, vol, seed) {
+  srand(seed || 1);
+  const d = [start];
+  for (let i = 1; i < len; i++) d.push(d[i-1] * (1 + drift + (rand()-0.5)*vol));
+  return d;
+}
+function genConsolidation(len, mid, range, vol, seed) {
+  srand(seed || 1);
+  const d = [];
+  for (let i = 0; i < len; i++) d.push(mid + Math.sin(i*0.15)*range*0.5 + (rand()-0.5)*vol*mid);
+  return d;
+}
+function genBreakout(len, mid, range, vol, seed) {
+  srand(seed || 1);
+  const d = [];
+  for (let i = 0; i < len; i++) {
+    if (i < len*0.55) d.push(mid + Math.sin(i*0.12)*range*0.3 + (rand()-0.5)*vol*mid*0.5);
+    else d.push((d[i-1]||mid) * (1 + 0.008 + (rand()-0.4)*vol*0.8));
+  }
+  return d;
+}
+function genDipRecovery(len, start, dropPct, vol, seed) {
+  srand(seed || 1);
+  const d = [start];
+  const bottom = Math.floor(len * 0.35);
+  for (let i = 1; i < len; i++) {
+    let drift;
+    if (i < bottom) drift = -dropPct / bottom + (rand()-0.55)*vol;
+    else drift = dropPct*1.5/(len-bottom) + (rand()-0.5)*vol;
+    d.push(d[i-1] * (1 + drift));
+  }
+  return d;
+}
+
+// ── Indicator helpers ──
+function sma(arr, period) {
+  const r = [];
+  for (let i = 0; i < arr.length; i++) {
+    if (i < period-1) { r.push(null); continue; }
+    let s = 0; for (let j = i-period+1; j <= i; j++) s += arr[j];
+    r.push(s / period);
+  }
+  return r;
+}
+function ema(arr, period) {
+  const r = [arr[0]];
+  const k = 2 / (period + 1);
+  for (let i = 1; i < arr.length; i++) r.push(arr[i]*k + r[i-1]*(1-k));
+  return r;
+}
+function rollingStd(arr, period) {
+  const m = sma(arr, period);
+  const r = [];
+  for (let i = 0; i < arr.length; i++) {
+    if (m[i] === null) { r.push(0); continue; }
+    let s = 0, cnt = 0;
+    for (let j = Math.max(0, i-period+1); j <= i; j++) { s += (arr[j]-m[i])**2; cnt++; }
+    r.push(Math.sqrt(s / cnt));
+  }
+  return r;
+}
+function computeRSI(arr, period) {
+  const r = [50];
+  for (let i = 1; i < arr.length; i++) {
+    const gains = [], losses = [];
+    for (let j = Math.max(1, i-period+1); j <= i; j++) {
+      const diff = arr[j] - arr[j-1];
+      gains.push(diff > 0 ? diff : 0);
+      losses.push(diff < 0 ? -diff : 0);
+    }
+    const avgG = gains.reduce((a,b)=>a+b,0)/gains.length;
+    const avgL = losses.reduce((a,b)=>a+b,0)/losses.length;
+    r.push(avgL === 0 ? 100 : 100 - 100/(1+avgG/avgL));
+  }
+  return r;
+}
+function donchian(highs, lows, period) {
+  const upper = [], lower = [];
+  for (let i = 0; i < highs.length; i++) {
+    const start = Math.max(0, i - period);
+    let maxH = -Infinity, minL = Infinity;
+    for (let j = start; j < i; j++) { maxH = Math.max(maxH, highs[j]); minL = Math.min(minL, lows[j]); }
+    upper.push(i < period ? null : maxH);
+    lower.push(i < period ? null : minL);
+  }
+  return { upper, lower };
+}
+
+// ── Chart drawing ──
+function drawChart(canvasId, config) {
+  const canvas = document.getElementById(canvasId);
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = rect.height;
+  const pad = { top: 24, right: 16, bottom: 28, left: 52 };
+  const cw = W - pad.left - pad.right;
+  const ch = H - pad.top - pad.bottom;
+
+  // Background
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const { price, layers, buySignals, sellSignals, annotations } = config;
+  const len = price.length;
+
+  // Y range
+  let allVals = [...price];
+  layers.forEach(l => { if (l.data) l.data.forEach(v => { if (v !== null && v !== undefined) allVals.push(v); }); });
+  const yMin = Math.min(...allVals) * 0.98;
+  const yMax = Math.max(...allVals) * 1.02;
+  const yRange = yMax - yMin || 1;
+
+  function x(i) { return pad.left + (i / (len - 1)) * cw; }
+  function y(v) { return pad.top + (1 - (v - yMin) / yRange) * ch; }
+
+  // Grid lines
+  ctx.strokeStyle = C.grid;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const gy = pad.top + ch * i / 4;
+    ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke();
+    const val = yMax - (yRange * i / 4);
+    ctx.fillStyle = C.label; ctx.font = '10px "Noto Sans TC"'; ctx.textAlign = 'right';
+    ctx.fillText(val.toFixed(0), pad.left - 6, gy + 3);
+  }
+
+  // Draw layers (bands first, then lines)
+  layers.forEach(layer => {
+    if (layer.type === 'band') {
+      ctx.fillStyle = layer.color;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < len; i++) {
+        if (layer.upper[i] === null) continue;
+        if (!started) { ctx.moveTo(x(i), y(layer.upper[i])); started = true; }
+        else ctx.lineTo(x(i), y(layer.upper[i]));
+      }
+      for (let i = len-1; i >= 0; i--) {
+        if (layer.lower[i] === null) continue;
+        ctx.lineTo(x(i), y(layer.lower[i]));
+      }
+      ctx.closePath(); ctx.fill();
+    }
+    if (layer.type === 'line' && layer.data) {
+      ctx.strokeStyle = layer.color;
+      ctx.lineWidth = layer.width || 1.2;
+      if (layer.dash) ctx.setLineDash(layer.dash);
+      else ctx.setLineDash([]);
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < len; i++) {
+        if (layer.data[i] === null) continue;
+        if (!started) { ctx.moveTo(x(i), y(layer.data[i])); started = true; }
+        else ctx.lineTo(x(i), y(layer.data[i]));
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (layer.type === 'stepLine' && layer.data) {
+      ctx.strokeStyle = layer.color;
+      ctx.lineWidth = layer.width || 1;
+      ctx.setLineDash(layer.dash || [4, 3]);
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < len; i++) {
+        if (layer.data[i] === null) continue;
+        if (!started) { ctx.moveTo(x(i), y(layer.data[i])); started = true; }
+        else { ctx.lineTo(x(i), y(layer.data[i-1] !== null ? layer.data[i-1] : layer.data[i])); ctx.lineTo(x(i), y(layer.data[i])); }
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+
+  // Price line
+  ctx.strokeStyle = C.price;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < len; i++) {
+    if (i === 0) ctx.moveTo(x(i), y(price[i]));
+    else ctx.lineTo(x(i), y(price[i]));
+  }
+  ctx.stroke();
+
+  // Buy markers
+  buySignals.forEach(i => {
+    if (i >= len) return;
+    const px = x(i), py = y(price[i]);
+    ctx.fillStyle = C.buy;
+    ctx.beginPath(); ctx.moveTo(px, py - 14); ctx.lineTo(px - 7, py - 2); ctx.lineTo(px + 7, py - 2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#0D1B0F'; ctx.font = 'bold 9px "Noto Sans TC"'; ctx.textAlign = 'center';
+    ctx.fillText('買', px, py - 5);
+  });
+
+  // Sell markers
+  sellSignals.forEach(i => {
+    if (i >= len) return;
+    const px = x(i), py = y(price[i]);
+    ctx.fillStyle = C.sell;
+    ctx.beginPath(); ctx.moveTo(px, py + 14); ctx.lineTo(px - 7, py + 2); ctx.lineTo(px + 7, py + 2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1B0D0D'; ctx.font = 'bold 9px "Noto Sans TC"'; ctx.textAlign = 'center';
+    ctx.fillText('賣', px, py + 11);
+  });
+
+  // Annotations
+  if (annotations) {
+    ctx.font = '10px "Noto Sans TC"';
+    annotations.forEach(a => {
+      const px = x(a.i), py = y(price[a.i]) + (a.below ? 22 : -22);
+      ctx.fillStyle = a.color || C.label;
+      ctx.textAlign = 'center';
+      ctx.fillText(a.text, px, py);
+    });
+  }
+}
+
+// ── Strategy configurations ──
+const LEN = 70;
+
+// 1. MA Cross — craft a trending price with clear MA crossovers
+// Design: decline → bottom → rise → first golden cross → pullback → death cross → rise → second golden cross → decline → second death cross
+const maPrice = (() => {
+  srand(101);
+  const d = [1550];
+  for (let i = 1; i < 14; i++) d.push(d[i-1] * (1 - 0.006 + (rand()-0.5)*0.006));   // decline to bottom
+  for (let i = 14; i < 28; i++) d.push(d[i-1] * (1 + 0.006 + (rand()-0.5)*0.006));   // rise → golden cross 1
+  for (let i = 28; i < 38; i++) d.push(d[i-1] * (1 - 0.005 + (rand()-0.5)*0.006));   // decline → death cross 1
+  for (let i = 38; i < 52; i++) d.push(d[i-1] * (1 + 0.006 + (rand()-0.5)*0.006));   // rise → golden cross 2
+  for (let i = 52; i < LEN; i++) d.push(d[i-1] * (1 - 0.005 + (rand()-0.5)*0.006));  // decline → death cross 2
+  return d;
+})();
+const ma9 = sma(maPrice, 9);
+const ma21 = sma(maPrice, 21);
+const maBuys = [], maSells = [];
+for (let i = 1; i < LEN; i++) {
+  if (ma9[i]!==null && ma21[i]!==null && ma9[i-1]!==null && ma21[i-1]!==null) {
+    if (ma9[i] > ma21[i] && ma9[i-1] <= ma21[i-1]) maBuys.push(i);
+    if (ma9[i] < ma21[i] && ma9[i-1] >= ma21[i-1]) maSells.push(i);
+  }
+}
+const maAnnotations = [];
+maBuys.forEach(i => maAnnotations.push({ i, text: 'MA9 上穿 MA21', below: false, color: C.buy }));
+maSells.forEach(i => maAnnotations.push({ i, text: 'MA9 下穿 MA21', below: true, color: C.sell }));
+
+// 2. Bollinger — craft oscillating price that touches bands
+// Design: oscillate around mid, with clear dips below lower band and spikes above upper band
+const bbPrice = (() => {
+  srand(202);
+  const mid = 109;
+  const d = [];
+  for (let i = 0; i < LEN; i++) {
+    // base wave + noise, with amplified dips/spikes at specific points
+    let base = mid + Math.sin(i * 0.18) * 4;
+    // Force a dip at ~i=18 and ~i=50
+    if (i === 18 || i === 50) base = mid - 6;
+    // Force a spike at ~i=35 and ~i=60
+    if (i === 35 || i === 60) base = mid + 6;
+    d.push(base + (rand()-0.5)*1.5);
+  }
+  return d;
+})();
+const bbMid = sma(bbPrice, 20);
+const bbStd = rollingStd(bbPrice, 20);
+const bbUpper = bbMid.map((v, i) => v !== null ? v + 2 * bbStd[i] : null);
+const bbLower = bbMid.map((v, i) => v !== null ? v - 2 * bbStd[i] : null);
+const bbRSI = computeRSI(bbPrice, 5);
+const bbBuys = [], bbSells = [];
+for (let i = 20; i < LEN; i++) {
+  if (bbLower[i] !== null && bbPrice[i] < bbLower[i] && bbRSI[i] < 30) bbBuys.push(i);
+  if (bbUpper[i] !== null && bbPrice[i] > bbUpper[i] && bbRSI[i] > 70) bbSells.push(i);
+}
+const bbAnnotations = [];
+bbBuys.forEach(i => bbAnnotations.push({ i, text: '跌破下軌+RSI<30', below: false, color: C.buy }));
+bbSells.forEach(i => bbAnnotations.push({ i, text: '突破上軌+RSI>70', below: true, color: C.sell }));
+
+// 3. VWAP — craft mean-reverting price
+const vwapPrice = (() => {
+  srand(303);
+  const mid = 96;
+  const d = [];
+  for (let i = 0; i < LEN; i++) {
+    let base = mid + Math.sin(i * 0.16) * 2.5;
+    // Force deviations at specific points
+    if (i === 20 || i === 52) base = mid - 4.5;  // oversold
+    if (i === 36 || i === 62) base = mid + 4.5;  // overbought
+    d.push(base + (rand()-0.5)*1.2);
+  }
+  return d;
+})();
+const vwapLine = sma(vwapPrice, 20);
+const vwapStd = rollingStd(vwapPrice, 20);
+const vwapUpper = vwapLine.map((v, i) => v !== null ? v + 1.5 * vwapStd[i] : null);
+const vwapLower = vwapLine.map((v, i) => v !== null ? v - 1.5 * vwapStd[i] : null);
+const vwapRSI = computeRSI(vwapPrice, 5);
+const vwapBuys = [], vwapSells = [];
+for (let i = 20; i < LEN; i++) {
+  if (vwapLower[i] !== null && vwapPrice[i] < vwapLower[i] && vwapRSI[i] < 30) vwapBuys.push(i);
+  if (vwapUpper[i] !== null && vwapPrice[i] > vwapUpper[i] && vwapRSI[i] > 70) vwapSells.push(i);
+}
+const vwapAnnotations = [];
+vwapBuys.forEach(i => vwapAnnotations.push({ i, text: '低於VWAP-1.5σ+RSI<30', below: false, color: C.buy }));
+vwapSells.forEach(i => vwapAnnotations.push({ i, text: '高於VWAP+1.5σ+RSI>70', below: true, color: C.sell }));
+
+// 4. Breakout — craft consolidation then breakout
+const brkPrice = (() => {
+  srand(404);
+  const mid = 272;
+  const d = [];
+  // Phase 1: tight consolidation (i=0..38)
+  for (let i = 0; i < 39; i++) d.push(mid + Math.sin(i*0.2)*3 + (rand()-0.5)*2);
+  // Phase 2: breakout upward (i=39..55)
+  for (let i = 39; i < 56; i++) d.push((d[i-1]||mid) * (1 + 0.009 + (rand()-0.35)*0.006));
+  // Phase 3: breakdown (i=56..69)
+  for (let i = 56; i < LEN; i++) d.push((d[i-1]) * (1 - 0.008 + (rand()-0.4)*0.006));
+  return d;
+})();
+const brkHigh = brkPrice.map(v => v * (1 + 0.005 + rand()*0.003));
+const brkLow = brkPrice.map(v => v * (1 - 0.005 - rand()*0.003));
+const { upper: donchHigh, lower: donchLow } = donchian(brkHigh, brkLow, 15);
+const brkBuys = [], brkSells = [];
+for (let i = 15; i < LEN; i++) {
+  if (donchHigh[i] !== null && brkPrice[i] > donchHigh[i]) brkBuys.push(i);
+  if (donchLow[i] !== null && brkPrice[i] < donchLow[i]) brkSells.push(i);
+}
+const brkAnnotations = [];
+brkBuys.forEach(i => brkAnnotations.push({ i, text: '突破15日高點', below: false, color: C.buy }));
+brkSells.forEach(i => brkAnnotations.push({ i, text: '跌破15日低點', below: true, color: C.sell }));
+
+// 5. Keep & Wait — craft a dip-recovery pattern
+const kwPrice = (() => {
+  srand(505);
+  const start = 1430;
+  const d = [start];
+  const bottom = 25;
+  for (let i = 1; i < LEN; i++) {
+    let drift;
+    if (i < bottom) drift = -0.006 + (rand()-0.55)*0.01;  // decline
+    else if (i < 50) drift = 0.005 + (rand()-0.5)*0.01;   // recovery
+    else drift = 0.003 + (rand()-0.5)*0.008;               // gentle rise
+    d.push(d[i-1] * (1 + drift));
+  }
+  return d;
+})();
+const kwAvgCost = kwPrice[0] * 0.7 + kwPrice[1] * 0.3;
+const kwAdd1 = kwAvgCost * 0.95;
+const kwAdd2 = kwAvgCost * 0.90;
+const kwTP = kwAvgCost * 1.15;
+const kwBuys = [0]; // initial buy
+const kwSells = [];
+for (let i = 1; i < LEN; i++) {
+  if (kwPrice[i] < kwAdd1 && kwPrice[i-1] >= kwAdd1) kwBuys.push(i);
+  else if (kwPrice[i] < kwAdd2 && kwPrice[i-1] >= kwAdd2) kwBuys.push(i);
+  if (kwPrice[i] > kwTP && kwPrice[i-1] <= kwTP) kwSells.push(i);
+}
+const kwLayers = [
+  { type: 'line', data: new Array(LEN).fill(kwAvgCost), color: 'rgba(212,168,67,0.5)', width: 1, dash: [6,4] },
+  { type: 'line', data: new Array(LEN).fill(kwAdd1), color: 'rgba(62,207,142,0.4)', width: 1, dash: [4,4] },
+  { type: 'line', data: new Array(LEN).fill(kwAdd2), color: 'rgba(62,207,142,0.3)', width: 1, dash: [4,4] },
+  { type: 'line', data: new Array(LEN).fill(kwTP), color: 'rgba(240,84,79,0.5)', width: 1, dash: [6,4] },
+];
+const kwAnnotations = [
+  { i: 0, text: '首購70%資金', below: true, color: C.buy },
+  ...kwBuys.filter(b=>b>0).map(b => ({ i: b, text: '加碼(-5%)', below: true, color: C.buy })),
+  ...kwSells.map(s => ({ i: s, text: '停利+15%', below: false, color: C.sell })),
+];
+
+// 6. Inst Momentum — craft trending price with institutional flow
+const instPrice = (() => {
+  srand(606);
+  const d = [500];
+  // Phase 1: gentle rise with new highs (i=1..30)
+  for (let i = 1; i < 31; i++) d.push(d[i-1] * (1 + 0.004 + (rand()-0.45)*0.012));
+  // Phase 2: stronger rise (i=31..55)
+  for (let i = 31; i < 56; i++) d.push(d[i-1] * (1 + 0.006 + (rand()-0.4)*0.01));
+  // Phase 3: decline below MA10 (i=56..69)
+  for (let i = 56; i < LEN; i++) d.push(d[i-1] * (1 - 0.007 + (rand()-0.5)*0.01));
+  return d;
+})();
+const instMA10 = sma(instPrice, 10);
+const instMA20 = sma(instPrice, 20);
+// Institutional bars
+srand(607);
+const instBars = [];
+for (let i = 0; i < LEN; i++) instBars.push((rand()-0.3) * 100);
+// Buy at new high + inst buying
+const instBuys = [];
+for (let i = 25; i < LEN; i++) {
+  let isHigh = true;
+  for (let j = i-20; j < i; j++) if (instPrice[i] < instPrice[j]) { isHigh = false; break; }
+  if (isHigh && instBars[i] > 30 && instPrice[i] > instMA20[i]) instBuys.push(i);
+}
+// Sell at MA10 trailing stop
+const instSells = [];
+for (let i = 1; i < LEN; i++) {
+  if (instMA10[i] !== null && instPrice[i] < instMA10[i] && instPrice[i-1] >= instMA10[i-1] && instBuys.some(b => b > 0 && b < i)) {
+    if (!instSells.length || instSells[instSells.length-1] < i-5) instSells.push(i);
+  }
+}
+const instBuysLimited = instBuys.slice(0, 2);
+const instSellsLimited = instSells.slice(0, 2);
+const instAnnotations = [];
+instBuysLimited.forEach(i => instAnnotations.push({ i, text: '創新高+法人買超', below: false, color: C.buy }));
+instSellsLimited.forEach(i => instAnnotations.push({ i, text: '跌破MA10停利', below: true, color: C.sell }));
+
+// ── Render cards ──
+const strategies = [
+  {
+    name: '均線交叉', en: 'MA Cross', stock: '2330 台積電',
+    desc: 'MA9 上穿 MA21 且 ATR 波動足夠 → 買進；MA9 下穿 MA21 → 賣出。ATR 過濾避免盤整假訊號。',
+    canvasId: 'chart-ma',
+    legend: [
+      { type: 'line', color: C.ma9, label: 'MA9（快線）' },
+      { type: 'line', color: C.ma21, label: 'MA21（慢線）' },
+      { type: 'dot', color: C.buy, label: '買進訊號' },
+      { type: 'dot', color: C.sell, label: '賣出訊號' },
+    ],
+    config: {
+      price: maPrice,
+      layers: [
+        { type: 'line', data: ma9, color: C.ma9, width: 1.2 },
+        { type: 'line', data: ma21, color: C.ma21, width: 1.2 },
+      ],
+      buySignals: maBuys.slice(0,2), sellSignals: maSells.slice(0,2),
+      annotations: [...maAnnotations.filter(a => maBuys.slice(0,2).includes(a.i) || maSells.slice(0,2).includes(a.i))],
+    }
+  },
+  {
+    name: '布林通道反轉', en: 'Bollinger Bands', stock: '0050 元大台灣50',
+    desc: '價格跌破下軌 + RSI < 30 → 買進；價格突破上軌 + RSI > 70 → 賣出。捕捉超跌反轉與超漲回歸。',
+    canvasId: 'chart-bb',
+    legend: [
+      { type: 'line', color: C.bbMid, label: 'MA20（中軌）' },
+      { type: 'line', color: C.bbUpper, label: '上軌 / 下軌（±2σ）' },
+      { type: 'dot', color: C.buy, label: '買進訊號' },
+      { type: 'dot', color: C.sell, label: '賣出訊號' },
+    ],
+    config: {
+      price: bbPrice,
+      layers: [
+        { type: 'band', upper: bbUpper, lower: bbLower, color: C.bbLower },
+        { type: 'line', data: bbMid, color: 'rgba(212,168,67,0.6)', width: 1, dash: [4,3] },
+      ],
+      buySignals: bbBuys.slice(0,2), sellSignals: bbSells.slice(0,2),
+      annotations: [...bbAnnotations.filter(a => bbBuys.slice(0,2).includes(a.i) || bbSells.slice(0,2).includes(a.i))],
+    }
+  },
+  {
+    name: 'VWAP 偏離反轉', en: 'VWAP Deviation', stock: '2881 富邦金',
+    desc: '價格低於 VWAP - 1.5σ 且 RSI < 30 → 買進；高於 VWAP + 1.5σ 且 RSI > 70 → 賣出。均值回歸策略。',
+    canvasId: 'chart-vwap',
+    legend: [
+      { type: 'line', color: C.vwap, label: 'VWAP' },
+      { type: 'line', color: C.vwapBand, label: 'VWAP ± 1.5σ' },
+      { type: 'dot', color: C.buy, label: '買進訊號' },
+      { type: 'dot', color: C.sell, label: '賣出訊號' },
+    ],
+    config: {
+      price: vwapPrice,
+      layers: [
+        { type: 'band', upper: vwapUpper, lower: vwapLower, color: C.vwapBand },
+        { type: 'line', data: vwapLine, color: C.vwap, width: 1.3 },
+      ],
+      buySignals: vwapBuys.slice(0,2), sellSignals: vwapSells.slice(0,2),
+      annotations: [...vwapAnnotations.filter(a => vwapBuys.slice(0,2).includes(a.i) || vwapSells.slice(0,2).includes(a.i))],
+    }
+  },
+  {
+    name: '唐奇安突破', en: 'Donchian Breakout', stock: '2382 中華電信',
+    desc: '價格突破 15 日最高價且 ATR 足夠 → 買進；跌破 15 日最低價 → 賣出。捕捉趨勢起點。',
+    canvasId: 'chart-brk',
+    legend: [
+      { type: 'line', color: C.donchian, label: 'Donchian 15 日通道' },
+      { type: 'dot', color: C.buy, label: '買進訊號' },
+      { type: 'dot', color: C.sell, label: '賣出訊號' },
+    ],
+    config: {
+      price: brkPrice,
+      layers: [
+        { type: 'stepLine', data: donchHigh, color: C.donchian, width: 1 },
+        { type: 'stepLine', data: donchLow, color: C.donchian, width: 1 },
+      ],
+      buySignals: brkBuys.slice(0,2), sellSignals: brkSells.slice(0,2),
+      annotations: [...brkAnnotations.filter(a => brkBuys.slice(0,2).includes(a.i) || brkSells.slice(0,2).includes(a.i))],
+    }
+  },
+  {
+    name: '低接等待', en: 'Keep & Wait (DCA)', stock: '2454 聯發科',
+    desc: '首購 70% 資金 → 跌 5% 加碼 → 再跌 5% 加碼 → 漲 15% 停利賣 50%。非技術分析策略，機械式 DCA。',
+    canvasId: 'chart-kw',
+    legend: [
+      { type: 'line', color: 'rgba(212,168,67,0.5)', label: '平均成本' },
+      { type: 'line', color: 'rgba(62,207,142,0.4)', label: '加碼水位' },
+      { type: 'line', color: 'rgba(240,84,79,0.5)', label: '停利線（+15%）' },
+      { type: 'dot', color: C.buy, label: '買進/加碼' },
+      { type: 'dot', color: C.sell, label: '停利賣出' },
+    ],
+    config: {
+      price: kwPrice,
+      layers: kwLayers,
+      buySignals: kwBuys.slice(0,3), sellSignals: kwSells.slice(0,1),
+      annotations: kwAnnotations.slice(0, 5),
+    }
+  },
+  {
+    name: '法人抬轎動能', en: 'Institutional Momentum', stock: '動態選股（前 150 大市值）',
+    desc: '魚過濾（法人低吃 ≥ 7 分）+ 創 20 日新高 + 法人買超 > 3% → 買進；跌破 MA10 移動停利或 -10% 硬停損 → 賣出。',
+    canvasId: 'chart-inst',
+    legend: [
+      { type: 'line', color: C.ma10, label: 'MA10（移動停利）' },
+      { type: 'line', color: C.ma20, label: 'MA20' },
+      { type: 'dot', color: C.buy, label: '買進訊號' },
+      { type: 'dot', color: C.sell, label: '賣出訊號' },
+    ],
+    config: {
+      price: instPrice,
+      layers: [
+        { type: 'line', data: instMA10, color: C.ma10, width: 1, dash: [4,3] },
+        { type: 'line', data: instMA20, color: C.ma20, width: 1, dash: [6,4] },
+      ],
+      buySignals: instBuysLimited, sellSignals: instSellsLimited,
+      annotations: instAnnotations,
+    }
+  },
+];
+
+// Build DOM
+const grid = document.getElementById('grid');
+strategies.forEach(s => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="card-header">
+      <div class="name">${s.name} <em>${s.en}</em></div>
+      <div class="stock">${s.stock}</div>
+    </div>
+    <div class="card-desc">${s.desc}</div>
+    <div class="chart-wrap"><canvas id="${s.canvasId}"></canvas></div>
+    <div class="legend">${s.legend.map(l => `
+      <div class="legend-item">
+        <div class="legend-${l.type === 'dot' ? 'dot' : 'line'}" style="background:${l.color};${l.type==='line'?'height:2px':''}"></div>
+        ${l.label}
+      </div>
+    `).join('')}</div>
+  `;
+  grid.appendChild(card);
+});
+
+// Draw all charts
+strategies.forEach(s => drawChart(s.canvasId, s.config));
+
+// Redraw on resize
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => strategies.forEach(s => drawChart(s.canvasId, s.config)), 150);
+});
+</script>
+</body>
+</html>
